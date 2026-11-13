@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>NEON DRIFT — Synthwave Racer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --cy:#00ffff; --mg:#ff00ff; --yl:#ffff00; --bg:#0a0014;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0014;color:#e8e8ff;
+  font-family:'Orbitron',system-ui,sans-serif;user-select:none;-webkit-tap-highlight-color:transparent}
+canvas{display:block;position:fixed;inset:0}
+#ui{position:fixed;inset:0;pointer-events:none;z-index:10}
+
+/* ---------- scanlines + vignette ---------- */
+#fx{position:fixed;inset:0;pointer-events:none;z-index:9;
+  background:radial-gradient(ellipse at center, transparent 62%, rgba(4,0,12,.42) 100%)}
+#flash{position:fixed;inset:0;pointer-events:none;z-index:11;background:#ff3355;opacity:0;transition:opacity .16s}
+
+/* ---------- HUD ---------- */
+#hud{position:absolute;inset:0;opacity:0;transition:opacity .4s}
+#hud.on{opacity:1}
+.panel{position:absolute;background:rgba(8,10,22,.62);border:1px solid rgba(120,200,255,.22);
+  border-radius:10px;padding:10px 16px;backdrop-filter:blur(6px);
+  box-shadow:0 4px 18px rgba(0,0,0,.35)}
+.lbl{font-size:10px;letter-spacing:.2em;color:#93a4bf;text-transform:uppercase}
+.val{font-variant-numeric:tabular-nums;font-weight:700;letter-spacing:.04em}
+#topLeft{top:16px;left:16px;min-width:190px}
+#ttime{font-size:25px;color:#f3f7ff;text-shadow:none}
+#ltime{font-size:14px;color:#8fe3ff}
+#topRight{top:16px;right:16px;text-align:right}
+#lapTxt{font-size:19px;color:#f3f7ff}
+#cpTxt{font-size:13px;color:#8fe3ff}
+#botLeft{bottom:18px;left:16px}
+#score{font-size:32px;font-weight:900;color:#f3f7ff;text-shadow:0 0 14px rgba(255,90,200,.45);line-height:1.1}
+#combo{font-size:18px;color:#ffd76a;opacity:0;transition:opacity .2s, transform .2s;
+  transform:translateY(6px)}
+#combo.on{opacity:1;transform:translateY(0) scale(1.08)}
+#botRight{bottom:18px;right:16px;width:210px;text-align:right}
+#nitroBar{height:10px;border-radius:6px;background:rgba(140,220,255,.10);overflow:hidden;
+  border:1px solid rgba(140,220,255,.30);margin-top:6px}
+#nitroFill{height:100%;width:0%;background:linear-gradient(90deg,#3a8fff,#6fe6ff);
+  transition:width .08s linear}
+#nitroBar.low #nitroFill{background:linear-gradient(90deg,#ff5a8a,#ff9ab5)}
+#center{bottom:14px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center}
+#speedoWrap{position:relative;width:170px;height:170px}
+#speedNum{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding-top:8px}
+#badge{text-align:center;font-size:22px;color:#f3f7ff;font-weight:700;font-variant-numeric:tabular-nums;
+  opacity:0;transform:translateY(-12px);transition:.25s}
+#badge.on{opacity:1;transform:translateY(-6px)}
+#driftWrap{margin-top:6px;width:min(330px,52vw);opacity:0;transition:opacity .25s}
+#driftWrap.on{opacity:1}
+#driftBar{height:6px;background:rgba(255,140,220,.14);border-radius:4px;overflow:hidden;border:1px solid rgba(255,140,220,.32)}
+#driftFill{height:100%;width:0%;background:linear-gradient(90deg,#ff5ad0,#ffd76a)}
+#driftTxt{font-size:11px;letter-spacing:.2em;color:#ff9ae0;text-align:center;margin-top:4px}
+
+/* ---------- screens ---------- */
+.screen{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:18px;pointer-events:auto;background:rgba(5,6,14,.88);
+  opacity:0;visibility:hidden;transition:opacity .35s, visibility .35s;padding:24px;text-align:center;overflow:auto}
+.screen.on{opacity:1;visibility:visible}
+h1{font-size:clamp(38px,9vw,84px);font-weight:900;letter-spacing:.1em;line-height:1;
+  color:#f4f8ff;text-shadow:0 0 18px rgba(255,58,160,.35)}
+h1 span{display:block;color:#8feaff;text-shadow:0 0 18px rgba(40,220,255,.35)}
+.sub{letter-spacing:.5em;font-size:clamp(10px,2vw,13px);color:#ffd76a;margin-top:-4px}
+.btn{pointer-events:auto;cursor:pointer;font-family:inherit;font-weight:700;letter-spacing:.16em;font-size:15px;
+  padding:13px 40px;border-radius:8px;color:#f4f8ff;background:rgba(40,220,255,.10);
+  border:2px solid rgba(80,225,255,.75);box-shadow:0 0 16px rgba(60,210,255,.22);
+  transition:transform .15s, background .2s, box-shadow .2s}
+.btn:hover{transform:translateY(-2px);background:rgba(40,220,255,.2);box-shadow:0 0 26px rgba(60,210,255,.4)}
+.btn.mg{border-color:rgba(255,90,190,.7);background:rgba(255,90,190,.08);box-shadow:none}
+.btn.sm{padding:9px 22px;font-size:12px}
+.keys{display:grid;grid-template-columns:auto auto;gap:6px 18px;font-size:12px;letter-spacing:.06em;
+  color:#c4cfe4;background:rgba(12,16,30,.85);border:1px solid rgba(130,190,255,.18);border-radius:10px;padding:14px 22px}
+.keys b{color:#8feaff}
+.keys i{font-style:normal;color:#93a4bf;text-align:left}
+#bar{width:min(340px,70vw);height:6px;border:1px solid rgba(130,190,255,.25);border-radius:4px;overflow:hidden}
+#barFill{height:100%;width:0%;background:linear-gradient(90deg,#ff5ac8,#6fe6ff);transition:width .2s}
+#loadTxt{font-size:11px;letter-spacing:.3em;color:#8feaff}
+.tbl{border-collapse:collapse;font-size:13px;min-width:min(420px,88vw);background:rgba(12,16,30,.7);
+  border:1px solid rgba(255,110,200,.22);border-radius:10px;overflow:hidden}
+.tbl td,.tbl th{padding:8px 16px;text-align:left;font-variant-numeric:tabular-nums}
+.tbl th{font-size:10px;letter-spacing:.2em;color:#93a4bf;border-bottom:1px solid rgba(255,110,200,.18)}
+.tbl tr:nth-child(even) td{background:rgba(255,110,200,.05)}
+.tbl .best td{color:#ffd76a}
+.big{font-size:clamp(18px,3vw,26px);color:#f4f8ff}
+.rec{color:#ffd76a;letter-spacing:.2em}
+.row{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+
+/* ---------- mute ---------- */
+#mute{position:absolute;top:16px;left:50%;transform:translateX(-50%);pointer-events:auto;cursor:pointer;
+  width:40px;height:40px;border-radius:50%;border:1px solid rgba(130,190,255,.28);background:rgba(10,14,26,.6);
+  color:#a9dcff;font-size:17px;line-height:1;backdrop-filter:blur(6px);z-index:12;display:none;place-items:center}
+#mute.on{display:grid}
+
+/* ---------- mobile controls ---------- */
+#touch{position:fixed;inset:0;z-index:11;display:none;pointer-events:none}
+#touch.on{display:block}
+#stickBase{position:absolute;left:24px;bottom:24px;width:140px;height:140px;border-radius:50%;
+  border:2px solid rgba(130,200,255,.32);background:rgba(120,200,255,.06);pointer-events:auto;touch-action:none}
+#stickKnob{position:absolute;left:50%;top:50%;width:60px;height:60px;margin:-30px 0 0 -30px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#a8f0ff,#3a8fff)}
+#hbBtn{position:absolute;right:26px;bottom:132px;width:104px;height:104px;border-radius:50%;pointer-events:auto;
+  border:2px solid rgba(255,120,200,.6);background:rgba(255,90,190,.12);color:#f4f8ff;font-family:inherit;font-size:11px;font-weight:700;
+  letter-spacing:.1em;touch-action:none}
+#nBtn{position:absolute;right:142px;bottom:26px;width:74px;height:74px;border-radius:50%;pointer-events:auto;
+  border:2px solid rgba(130,210,255,.6);background:rgba(90,200,255,.12);color:#f4f8ff;font-family:inherit;font-size:11px;font-weight:700;
+  letter-spacing:.1em;touch-action:none}
+#hbBtn.act,#nBtn.act{transform:scale(.94);filter:brightness(1.25)}
+</style>
+</head>
+<body>
+<div id="fx"></div>
+<div id="flash"></div>
+
+<div id="ui">
+  <div id="hud">
+    <div class="panel" id="topLeft"><div class="lbl">Время</div><div class="val" id="ttime">00:00.000</div>
+      <div class="lbl" style="margin-top:6px">Круг</div><div class="val" id="ltime">00:00.000</div></div>
+    <div class="panel" id="topRight"><div class="lbl">Круг</div><div class="val" id="lapTxt">1 / 3</div>
+      <div class="val" id="cpTxt">Чекпоинт 0 / 4</div></div>
+    <div class="panel" id="botLeft"><div class="lbl">Дрифт-очки</div><div class="val" id="score">0</div>
+      <div class="val" id="combo">x1</div></div>
+    <div class="panel" id="botRight"><div class="lbl">⚡ Нитро</div><div id="nitroBar"><div id="nitroFill"></div></div></div>
+    <div id="center">
+      <div style="text-align:center"><div id="badge">CHECKPOINT</div></div>
+      <div id="speedoWrap">
+        <svg viewBox="0 0 200 200" width="170" height="170">
+          <circle cx="100" cy="100" r="86" fill="rgba(8,10,22,.55)" stroke="rgba(150,200,240,.20)" stroke-width="2"/>
+          <circle id="arch" cx="100" cy="100" r="76" fill="none" stroke="#222c42" stroke-width="9"
+            stroke-dasharray="358 478" stroke-linecap="round" transform="rotate(135 100 100)"/>
+          <circle id="archFill" cx="100" cy="100" r="76" fill="none" stroke="url(#g1)" stroke-width="9"
+            stroke-dasharray="0 478" stroke-linecap="round" transform="rotate(135 100 100)"/>
+          <defs><linearGradient id="g1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5ec8ff"/><stop offset="1" stop-color="#ff6ad5"/></linearGradient></defs>
+        </svg>
+        <div id="speedNum"><div class="val" id="spd" style="font-size:40px;color:#f4f8ff">0</div>
+          <div class="lbl" style="margin-top:-4px">км/ч</div></div>
+      </div>
+      <div id="driftWrap"><div id="driftBar"><div id="driftFill"></div></div><div id="driftTxt">DRIFT 0°</div></div>
+    </div>
+  </div>
+
+  <button id="mute" title="Звук">🔊</button>
+
+  <div class="screen on" id="scrLoad">
+    <div class="sub">SYNTHWAVE RACER</div>
+    <h1>NEON <span>DRIFT</span></h1>
+    <div id="bar"><div id="barFill"></div></div>
+    <div id="loadTxt">ГЕНЕРАЦИЯ ТРАССЫ…</div>
+  </div>
+
+  <div class="screen" id="scrStart">
+    <h1>NEON <span>DRIFT</span></h1>
+    <div class="sub">SYNTHWAVE RACER</div>
+    <div class="keys">
+      <b>W / ↑</b><i>газ</i><b>S / ↓</b><i>тормоз / назад</i>
+      <b>A D / ← →</b><i>руль</i><b>SPACE</b><i>ручник — дрифт</i>
+      <b>SHIFT</b><i>нитро</i><b>R</b><i>респавн</i>
+      <b>ESC</b><i>пауза</i><b>M</b><i>звук</i>
+    </div>
+    <button class="btn" id="btnStart">START</button>
+    <div class="lbl" id="bestLbl" style="letter-spacing:.2em"></div>
+  </div>
+
+  <div class="screen" id="scrPause">
+    <h1 style="font-size:clamp(28px,6vw,56px)">ПАУЗА</h1>
+    <div class="row"><button class="btn" id="btnResume">ПРОДОЛЖИТЬ</button></div>
+    <div class="row"><button class="btn sm" id="btnRestartP">ЗАНОВО</button>
+      <button class="btn sm mg" id="btnMenuP">В МЕНЮ</button></div>
+  </div>
+
+  <div class="screen" id="scrFinish">
+    <h1 style="font-size:clamp(30px,7vw,64px)">🏆 ФИНИШ!</h1>
+    <div class="big" id="finTime"></div>
+    <div id="recLbl" class="rec" style="display:none">НОВЫЙ РЕКОРД!</div>
+    <table class="tbl"><thead><tr><th>Круг</th><th>Время</th><th>Очки</th></tr></thead><tbody id="lapsBody"></tbody></table>
+    <div class="row"><button class="btn" id="btnAgain">ЗАНОВО</button>
+      <button class="btn sm mg" id="btnMenuF">В МЕНЮ</button></div>
+  </div>
+</div>
+
+<div id="touch">
+  <div id="stickBase"><div id="stickKnob"></div></div>
+  <button id="hbBtn">РУЧНИК</button>
+  <button id="nBtn">НИТРО</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+/* =====================================================================
+   1. КОНФИГ
+   ===================================================================== */
+const CFG = {
+  enginePower: 35, drag: 0.995, brake: 26, reversePower: 16,
+  maxSpeed: 50, nitroSpeed: 75,
+  turnSpeed: 1.75, grip: 1.0, gripHand: 0.30, driftThresh: 15,
+  trackWidth: 18, halfWidth: 9, laps: 3, checkpoints: 4,
+  fog: 0.008, baseFov: 70, nitroFov: 85,
+  nitroDrain: 25, nitroDriftRegen: 5, nitroRegen: 2,
+  scoreCP: 500, scoreLap: 2000, scoreNitro: 10,
+  speedKmh: 3.6 * 2.4
+};
+
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const damp = (a, b, l, dt) => lerp(a, b, 1 - Math.exp(-l * dt));
+const fmt = (ms) => {
+  if (!isFinite(ms)) return '--:--.---';
+  const m = Math.floor(ms / 60000), s = Math.floor(ms / 1000) % 60, t = Math.floor(ms % 1000);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(t).padStart(3, '0')}`;
+};
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+
+/* =====================================================================
+   2. РЕНДЕРЕР / СЦЕНА
+   ===================================================================== */
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.95;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x0a0014, CFG.fog);
+
+const camera = new THREE.PerspectiveCamera(CFG.baseFov, innerWidth / innerHeight, 0.5, 3000);
+camera.position.set(0, 6, 18);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.38, 0.35, 0.62);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+/* --- небо --- */
+const skyGeo = new THREE.SphereGeometry(1400, 40, 24);
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false,
+  uniforms: {
+    top: { value: new THREE.Color(0x0b0a1e) },
+    mid: { value: new THREE.Color(0x241a46) },
+    hor: { value: new THREE.Color(0x8a2a5e) }
+  },
+  vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0);} `,
+  fragmentShader: `
+    uniform vec3 top; uniform vec3 mid; uniform vec3 hor; varying vec3 vP;
+    void main(){
+      float h = normalize(vP).y;
+      vec3 c = mix(hor, mid, smoothstep(-0.02, 0.30, h));
+      c = mix(c, top, smoothstep(0.20, 0.88, h));
+      c += hor * 0.16 * exp(-abs(h)*26.0);
+      gl_FragColor = vec4(c, 1.0);
+    }`
+});
+scene.add(new THREE.Mesh(skyGeo, skyMat));
+
+/* --- солнце / луна --- */
+const sunGroup = new THREE.Group();
+const sunDisc = new THREE.Mesh(new THREE.SphereGeometry(70, 32, 20),
+  new THREE.MeshBasicMaterial({ color: 0xffa040 }));
+sunDisc.position.set(-260, 70, -1150);
+sunGroup.add(sunDisc);
+const ring = new THREE.Mesh(new THREE.TorusGeometry(150, 2.2, 8, 80),
+  new THREE.MeshBasicMaterial({ color: 0xd0408a, transparent: true, opacity: 0.3 }));
+ring.position.copy(sunDisc.position);
+sunGroup.add(ring);
+const moon = new THREE.Mesh(new THREE.SphereGeometry(26, 24, 16),
+  new THREE.MeshBasicMaterial({ color: 0xdfe9ff }));
+moon.position.set(520, 420, -1050);
+sunGroup.add(moon);
+scene.add(sunGroup);
+
+/* --- сетка-горизонт --- */
+const gridMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  uniforms: { c1: { value: new THREE.Color(0xc0407a) }, c2: { value: new THREE.Color(0x3a7fa0) } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0);} `,
+  fragmentShader: `
+    varying vec2 vUv; uniform vec3 c1; uniform vec3 c2;
+    void main(){
+      vec2 g = abs(fract(vUv*90.0)-0.5);
+      float l = smoothstep(0.485, 0.5, max(g.x, g.y));
+      float d = length(vUv-0.5)*2.0;
+      float fade = smoothstep(1.0, 0.22, d);
+      vec3 col = mix(c2, c1, smoothstep(0.0,0.6,vUv.y));
+      gl_FragColor = vec4(col, l*fade*0.34);
+    }`
+});
+const grid = new THREE.Mesh(new THREE.PlaneGeometry(2600, 2600, 1, 1), gridMat);
+grid.rotation.x = -Math.PI / 2;
+grid.position.y = -0.35;
+scene.add(grid);
+
+/* --- освещение --- */
+scene.add(new THREE.AmbientLight(0x8090b8, 0.72));
+const moonLight = new THREE.DirectionalLight(0xc8d8ff, 1.55);
+moonLight.position.set(-60, 120, -80);
+moonLight.castShadow = true;
+moonLight.shadow.mapSize.set(2048, 2048);
+const sc = moonLight.shadow.camera;
+sc.left = -90; sc.right = 90; sc.top = 90; sc.bottom = -90; sc.near = 1; sc.far = 400;
+moonLight.shadow.bias = -0.0008;
+scene.add(moonLight);
+scene.add(moonLight.target);
+const magentaLight = new THREE.PointLight(0xff3d8f, 90, 120, 2);
+magentaLight.position.set(-40, 12, 0); scene.add(magentaLight);
+const cyanLight = new THREE.PointLight(0x3ec8ff, 90, 120, 2);
+cyanLight.position.set(40, 12, 0); scene.add(cyanLight);
+
+/* =====================================================================
+   3. ТРАССА
+   ===================================================================== */
+let seed = 20260413;
+const RNG = mulberry32(seed);
+
+function makeWaypoints(n = 11, rx = 170, rz = 135) {
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = i / n * Math.PI * 2;
+    const r = 0.62 + RNG() * 0.55;
+    const x = Math.cos(a) * rx * r + (RNG() - 0.5) * 18;
+    const z = Math.sin(a) * rz * r + (RNG() - 0.5) * 18;
+    pts.push(new THREE.Vector3(x, 0, z));
+  }
+  return pts;
+}
+const waypoints = makeWaypoints();
+const curve = new THREE.CatmullRomCurve3(waypoints, true, 'catmullrom', 0.5);
+const TRACK_LEN = curve.getLength();
+const SAMPLES = 900;
+const samplePts = [], sampleTan = [];
+for (let i = 0; i < SAMPLES; i++) {
+  const u = i / SAMPLES;
+  samplePts.push(curve.getPointAt(u));
+  sampleTan.push(curve.getTangentAt(u));
+}
+
+const trackGroup = new THREE.Group();
+scene.add(trackGroup);
+
+/* поверхность — лента */
+function buildRibbon() {
+  const N = SAMPLES, w = CFG.trackWidth;
+  const pos = [], uv = [], idx = [];
+  for (let i = 0; i <= N; i++) {
+    const k = i % N;
+    const p = samplePts[k], t = sampleTan[k];
+    const right = new THREE.Vector3(t.z, 0, -t.x).normalize();
+    pos.push(p.x - right.x * w / 2, 0, p.z - right.z * w / 2);
+    pos.push(p.x + right.x * w / 2, 0, p.z + right.z * w / 2);
+    uv.push(0, i * 0.12); uv.push(1, i * 0.12);
+    if (i < N) {
+      const a = i * 2;
+      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x2a2c3a, roughness: 0.55, metalness: 0.65, emissive: 0x0a0a14, emissiveIntensity: 0.25 });
+  const m = new THREE.Mesh(g, mat);
+  m.receiveShadow = true;
+  trackGroup.add(m);
+}
+buildRibbon();
+
+/* неоновая подсветка по краям (TubeGeometry) */
+function edgeCurve(offset) {
+  const pts = [];
+  for (let i = 0; i <= SAMPLES; i += 3) {
+    const k = i % SAMPLES;
+    const p = samplePts[k], t = sampleTan[k];
+    const r = new THREE.Vector3(t.z, 0, -t.x).normalize();
+    pts.push(new THREE.Vector3(p.x + r.x * offset, 0.06, p.z + r.z * offset));
+  }
+  return new THREE.CatmullRomCurve3(pts, true);
+}
+const edgeR = edgeCurve(CFG.halfWidth);
+const edgeL = edgeCurve(-CFG.halfWidth);
+trackGroup.add(new THREE.Mesh(new THREE.TubeGeometry(edgeL, 600, 0.16, 6, true),
+  new THREE.MeshStandardMaterial({ color: 0x1a1020, emissive: 0xff4fa8, emissiveIntensity: 1.1 })));
+trackGroup.add(new THREE.Mesh(new THREE.TubeGeometry(edgeR, 600, 0.16, 6, true),
+  new THREE.MeshStandardMaterial({ color: 0x101a22, emissive: 0x4fd8ff, emissiveIntensity: 1.1 })));
+
+/* разметка — пунктир по центру */
+const dashGeo = new THREE.PlaneGeometry(0.28, 3.2);
+const dashMat = new THREE.MeshBasicMaterial({ color: 0xc8d8f0, transparent: true, opacity: 0.35, depthWrite: false });
+const dashCount = Math.floor(TRACK_LEN / 9);
+const dashes = new THREE.InstancedMesh(dashGeo, dashMat, dashCount);
+{
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i < dashCount; i++) {
+    const u = i / dashCount;
+    const p = curve.getPointAt(u), t = curve.getTangentAt(u);
+    q.setFromAxisAngle(up, Math.atan2(t.x, t.z));
+    m4.compose(new THREE.Vector3(p.x, 0.02, p.z), q, new THREE.Vector3(1, 1, 1));
+    dashes.setMatrixAt(i, m4);
+  }
+}
+trackGroup.add(dashes);
+
+/* чекпоинты-ворота */
+const checkpointU = [];
+const gateRingGeo = new THREE.TorusGeometry(CFG.halfWidth, 0.22, 8, 40);
+for (let i = 0; i < CFG.checkpoints; i++) checkpointU.push((i + 1) / CFG.checkpoints % 1);
+const gateMeshes = [];
+for (const u of checkpointU) {
+  const p = curve.getPointAt(u), t = curve.getTangentAt(u);
+  const g = new THREE.Group();
+  const mate = gateMeshes.length % 2 ? 0x4fd8ff : 0xff5aa8;
+  const ringM = new THREE.Mesh(new THREE.TorusGeometry(CFG.halfWidth, 0.3, 10, 48),
+    new THREE.MeshStandardMaterial({ color: 0x22283a, emissive: mate, emissiveIntensity: 1.2, metalness: 0.8, roughness: 0.35 }));
+  ringM.position.y = CFG.halfWidth + 0.2;
+  ringM.rotation.y = Math.atan2(t.x, t.z);
+  g.add(ringM);
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x2a3044, emissive: mate, emissiveIntensity: 0.55, metalness: 0.7, roughness: 0.4 });
+  for (const s of [-1, 1]) {
+    const r = new THREE.Vector3(t.z, 0, -t.x).normalize();
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.34, CFG.halfWidth + 0.4, 10), postMat);
+    post.position.set(p.x + r.x * CFG.halfWidth * s, (CFG.halfWidth) / 2, p.z + r.z * CFG.halfWidth * s);
+    post.castShadow = true;
+    g.add(post);
+  }
+  g.position.set(0, 0, 0);
+  ringM.userData.ring = true;
+  gateMeshes.push({ group: g, mesh: ringM, mat: ringM.material, u, pulse: 0 });
+  trackGroup.add(g);
+}
+/* стартовая линия */
+const startLine = (() => {
+  const p = curve.getPointAt(0), t = curve.getTangentAt(0);
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
+  const cx = cv.getContext('2d');
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+    cx.fillStyle = (x + y) % 2 ? '#ffffff' : '#111111'; cx.fillRect(x * 16, y * 16, 16, 16);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(CFG.trackWidth, 3),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.85 }));
+  m.rotation.x = -Math.PI / 2; m.rotation.z = 0;
+  m.position.set(p.x, 0.03, p.z);
+  m.rotation.y = 0;
+  const holder = new THREE.Group();
+  holder.position.set(p.x, 0.03, p.z);
+  holder.rotation.y = Math.atan2(t.x, t.z);
+  m.position.set(0, 0, 0);
+  m.rotation.set(-Math.PI / 2, 0, 0);
+  holder.add(m);
+  trackGroup.add(holder);
+  return holder;
+})();
+
+/* декор: неоновые пальмы, башни, звёзды, арки */
+const palmGeoStem = new THREE.CylinderGeometry(0.18, 0.26, 6.2, 6);
+const palmGeoTop = new THREE.TorusGeometry(1.5, 0.12, 5, 16);
+const palmGeoLeaf = new THREE.BoxGeometry(2.8, 0.12, 0.42);
+const palmMatStem = new THREE.MeshStandardMaterial({ color: 0x20222e, emissive: 0x252038, emissiveIntensity: 0.3, roughness: 0.65, metalness: 0.4 });
+const decorate = () => {
+  const pts = [];
+  const step = 0.018;
+  for (let u = 0; u < 1; u += step) {
+    const p = curve.getPointAt(u), t = curve.getTangentAt(u);
+    const r = new THREE.Vector3(t.z, 0, -t.x).normalize();
+    const side = RNG() > 0.5 ? 1 : -1;
+    const off = CFG.halfWidth + 4 + RNG() * 9;
+    const col = RNG() > 0.5 ? 0xff5aa8 : 0x4fd8ff;
+    const g = new THREE.Group();
+    const stem = new THREE.Mesh(palmGeoStem, palmMatStem);
+    stem.position.y = 3.1; g.add(stem);
+    const top = new THREE.Mesh(palmGeoTop, new THREE.MeshStandardMaterial({ color: 0x232838, emissive: col, emissiveIntensity: 1.1 }));
+    top.rotation.x = Math.PI / 2; top.position.y = 6.3; g.add(top);
+    for (let k = 0; k < 4; k++) {
+      const leaf = new THREE.Mesh(palmGeoLeaf, new THREE.MeshStandardMaterial({ color: 0x232838, emissive: col, emissiveIntensity: 0.6 }));
+      leaf.position.y = 6.3;
+      leaf.rotation.set(0, k * Math.PI / 2, 0.15);
+      leaf.rotateZ(0.12);
+      g.add(leaf);
+    }
+    g.position.set(p.x + r.x * off * side, 0, p.z + r.z * off * side);
+    g.rotation.y = RNG() * Math.PI;
+    g.userData.phase = RNG() * 6.28;
+    trackGroup.add(g);
+    pts.push(g);
+    if (RNG() > 0.55) {
+      const h = 14 + RNG() * 46;
+      const tw = new THREE.Mesh(new THREE.BoxGeometry(6 + RNG() * 8, h, 6 + RNG() * 8),
+        new THREE.MeshStandardMaterial({ color: 0x1a1c28, emissive: col, emissiveIntensity: 0.10, roughness: 0.9, metalness: 0.3 }));
+      tw.position.set(p.x + r.x * (off + 26 + RNG() * 40) * side, h / 2, p.z + r.z * (off + 26 + RNG() * 40) * side);
+      trackGroup.add(tw);
+    }
+  }
+  return pts;
+};
+const palms = decorate();
+
+/* звёзды */
+{
+  const N = 900, pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
+  const cA = new THREE.Color(0x9fd8ff), cB = new THREE.Color(0xffa8d8);
+  for (let i = 0; i < N; i++) {
+    const a = RNG() * Math.PI * 2, r = 160 + RNG() * 550;
+    pos[i * 3] = Math.cos(a) * r; pos[i * 3 + 1] = 18 + RNG() * 160; pos[i * 3 + 2] = Math.sin(a) * r;
+    const c = RNG() > 0.5 ? cA : cB;
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const stars = new THREE.Points(g, new THREE.PointsMaterial({ size: 1.6, vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false, sizeAttenuation: true }));
+  scene.add(stars);
+  window.__stars = stars;
+}
+
+/* =====================================================================
+   4. МАШИНА
+   ===================================================================== */
+const carRoot = new THREE.Group();
+const carBody = new THREE.Group();
+carRoot.add(carBody);
+scene.add(carRoot);
+
+const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2c3040, metalness: 0.8, roughness: 0.32, emissive: 0x08080f, emissiveIntensity: 0.2 });
+const hull = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.62, 4.0), bodyMat);
+hull.position.y = 0.72; hull.castShadow = true; hull.receiveShadow = true; carBody.add(hull);
+const nose = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.34, 1.0), bodyMat);
+nose.position.set(0, 0.55, 2.05); nose.castShadow = true; carBody.add(nose);
+const spoilerBar = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.1, 0.42), new THREE.MeshStandardMaterial({ color: 0x22263a, emissive: 0xff5aa8, emissiveIntensity: 0.7, roughness: 0.5 }));
+spoilerBar.position.set(0, 1.25, -1.95); carBody.add(spoilerBar);
+const cabinMat = new THREE.MeshStandardMaterial({ color: 0x162230, metalness: 0.5, roughness: 0.12, transparent: true, opacity: 0.78, emissive: 0x2f7f9a, emissiveIntensity: 0.32 });
+const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.52, 2.0), cabinMat);
+cabin.position.set(0, 1.22, -0.15); cabin.castShadow = true; carBody.add(cabin);
+
+/* колёса */
+const wheelMat = new THREE.MeshStandardMaterial({ color: 0x0c0d12, roughness: 0.92, metalness: 0.15 });
+const rimMat = new THREE.MeshStandardMaterial({ color: 0x2a3040, emissive: 0x4fd8ff, emissiveIntensity: 0.8, roughness: 0.45, metalness: 0.85 });
+const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.34, 18);
+const rimGeo = new THREE.TorusGeometry(0.28, 0.045, 6, 18);
+const wheels = [];
+for (const [x, z, front] of [[-0.98, 1.28, 1], [0.98, 1.28, 1], [-0.98, -1.32, 0], [0.98, -1.32, 0]]) {
+  const pivot = new THREE.Group();
+  pivot.position.set(x, 0.42, z);
+  const w = new THREE.Mesh(wheelGeo, wheelMat);
+  w.rotation.z = Math.PI / 2; w.castShadow = true;
+  const rim = new THREE.Mesh(rimGeo, rimMat);
+  rim.rotation.y = Math.PI / 2; rim.scale.set(1, 1, 1);
+  pivot.add(w); pivot.add(rim);
+  carBody.add(pivot);
+  wheels.push({ pivot, mesh: w, rim, front });
+}
+
+/* фары и стопы */
+const headMat = new THREE.MeshBasicMaterial({ color: 0xe8f6ff });
+for (const x of [-0.6, 0.6]) {
+  const hl = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.1), headMat);
+  hl.position.set(x, 0.66, 2.5); carBody.add(hl);
+}
+const spot = new THREE.SpotLight(0xcfe6ff, 150, 70, 0.62, 0.5, 1.4);
+spot.position.set(0, 0.95, 1.9); spot.target.position.set(0, 0, 22);
+carBody.add(spot); carBody.add(spot.target);
+
+const tailMat = new THREE.MeshStandardMaterial({ color: 0x2a0a14, emissive: 0xff2b47, emissiveIntensity: 1.3 });
+const tailLights = [];
+for (const x of [-0.64, 0.64]) {
+  const tl = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.16, 0.12), tailMat);
+  tl.position.set(x, 0.84, -2.02); carBody.add(tl); tailLights.push(tl);
+}
+const tailGlow = new THREE.PointLight(0xff2b47, 14, 13, 2);
+tailGlow.position.set(0, 0.7, -2.5); carBody.add(tailGlow);
+
+/* underglow */
+const underglow = new THREE.PointLight(0xff4fa8, 22, 9, 2);
+underglow.position.set(0, 0.22, 0); carBody.add(underglow);
+const underPlane = new THREE.Mesh(new THREE.PlaneGeometry(2.7, 4.6),
+  new THREE.MeshBasicMaterial({ color: 0xff4fa8, transparent: true, opacity: 0.10, blending: THREE.AdditiveBlending, depthWrite: false }));
+underPlane.rotation.x = -Math.PI / 2; underPlane.position.y = 0.02; carBody.add(underPlane);
+
+/* выхлоп */
+const exhaustMat = new THREE.MeshStandardMaterial({ color: 0x241008, emissive: 0xff7a30, emissiveIntensity: 0.9 });
+const exhaustTips = [];
+for (const x of [-0.42, 0.42]) {
+  const e = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), exhaustMat);
+  e.position.set(x, 0.44, -2.06); carBody.add(e); exhaustTips.push(e);
+}
+
+/* =====================================================================
+   5. ЧАСТИЦЫ
+   ===================================================================== */
+function makeParticles(count, size, color, blending = THREE.AdditiveBlending) {
+  const pos = new Float32Array(count * 3);
+  const life = new Float32Array(count);
+  const vel = new Float32Array(count * 3);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setDrawRange(0, count);
+  const m = new THREE.PointsMaterial({ size, color, transparent: true, opacity: 0.85, depthWrite: false, blending });
+  const p = new THREE.Points(g, m);
+  p.frustumCulled = false;
+  scene.add(p);
+  return { p, pos, vel, life, count, cursor: 0 };
+}
+const smoke = makeParticles(260, 1.15, 0xb9b6c8, THREE.NormalBlending);
+smoke.p.material.opacity = 0.3;
+const nitroFx = makeParticles(200, 0.75, 0x8fe6ff);
+
+function emit(sys, x, y, z, vx, vy, vz, spread) {
+  const i = sys.cursor; sys.cursor = (sys.cursor + 1) % sys.count;
+  sys.pos[i * 3] = x + (Math.random() - 0.5) * spread;
+  sys.pos[i * 3 + 1] = y + (Math.random() - 0.5) * spread * 0.5;
+  sys.pos[i * 3 + 2] = z + (Math.random() - 0.5) * spread;
+  sys.vel[i * 3] = vx + (Math.random() - 0.5) * 2;
+  sys.vel[i * 3 + 1] = vy + Math.random() * 1.6;
+  sys.vel[i * 3 + 2] = vz + (Math.random() - 0.5) * 2;
+  sys.life[i] = 1;
+}
+function updateParticles(sys, dt) {
+  const arr = sys.p.geometry.attributes.position.array;
+  for (let i = 0; i < sys.count; i++) {
+    if (sys.life[i] <= 0) { arr[i * 3 + 1] = -999; continue; }
+    sys.life[i] -= dt * 0.9;
+    sys.pos[i * 3] += sys.vel[i * 3] * dt;
+    sys.pos[i * 3 + 1] += sys.vel[i * 3 + 1] * dt;
+    sys.pos[i * 3 + 2] += sys.vel[i * 3 + 2] * dt;
+    sys.vel[i * 3] *= 0.97; sys.vel[i * 3 + 2] *= 0.97;
+    arr[i * 3] = sys.pos[i * 3]; arr[i * 3 + 1] = sys.pos[i * 3 + 1]; arr[i * 3 + 2] = sys.pos[i * 3 + 2];
+  }
+  sys.p.geometry.attributes.position.needsUpdate = true;
+}
+
+/* расширяющееся кольцо чекпоинта */
+const burst = new THREE.Mesh(new THREE.TorusGeometry(3, 0.3, 8, 44),
+  new THREE.MeshBasicMaterial({ color: 0x6fe0ff, transparent: true, opacity: 0 }));
+burst.rotation.x = -Math.PI / 2;
+scene.add(burst);
+let burstT = 0;
+
+/* =====================================================================
+   6. ЗВУК
+   ===================================================================== */
+const Audio5 = (() => {
+  let ctx = null, master = null, eng = null, engGain = null, eng2 = null, driftNoise = null, driftGain = null, driftFilter = null;
+  let noiseBuf = null, muted = false, ready = false;
+  function noise() {
+    if (!noiseBuf) {
+      const len = ctx.sampleRate * 2;
+      noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.loop = true; return s;
+  }
+  function init() {
+    if (ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    ctx = new AC();
+    master = ctx.createGain(); master.gain.value = muted ? 0 : 0.55; master.connect(ctx.destination);
+    /* двигатель */
+    engGain = ctx.createGain(); engGain.gain.value = 0.0;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1400; lp.Q.value = 3;
+    eng = ctx.createOscillator(); eng.type = 'sawtooth'; eng.frequency.value = 60;
+    eng2 = ctx.createOscillator(); eng2.type = 'square'; eng2.frequency.value = 30;
+    const g2 = ctx.createGain(); g2.gain.value = 0.35;
+    eng.connect(lp); eng2.connect(g2); g2.connect(lp); lp.connect(engGain); engGain.connect(master);
+    eng.start(); eng2.start();
+    /* дрифт-шум */
+    const src = noise();
+    driftFilter = ctx.createBiquadFilter(); driftFilter.type = 'bandpass'; driftFilter.frequency.value = 2600; driftFilter.Q.value = 1.1;
+    driftGain = ctx.createGain(); driftGain.gain.value = 0;
+    src.connect(driftFilter); driftFilter.connect(driftGain); driftGain.connect(master); src.start();
+    ready = true;
+  }
+  function resume() { if (ctx && ctx.state === 'suspended') ctx.resume(); }
+  function beep(freq, dur, type = 'sine', vol = 0.25, when = 0) {
+    if (!ready) return;
+    const t = ctx.currentTime + when;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.02);
+  }
+  return {
+    init, resume,
+    get muted() { return muted; },
+    toggleMute() { muted = !muted; if (master) master.gain.value = muted ? 0 : 0.55; return muted; },
+    setEngine(speedRatio, throttle) {
+      if (!ready) return;
+      const f = 46 + speedRatio * 150;
+      eng.frequency.setTargetAtTime(f, ctx.currentTime, 0.06);
+      eng2.frequency.setTargetAtTime(f * 0.5, ctx.currentTime, 0.06);
+      engGain.gain.setTargetAtTime(0.05 + speedRatio * 0.1 + Math.abs(throttle) * 0.035, ctx.currentTime, 0.09);
+    },
+    setDrift(amount) { if (!ready) return; driftGain.gain.setTargetAtTime(clamp(amount, 0, 1) * 0.16, ctx.currentTime, 0.06); },
+    checkpoint() { beep(880, 0.42, 'sine', 0.22); beep(1320, 0.42, 'sine', 0.16, 0.02); },
+    lap() { [523, 659, 784, 1046].forEach((f, i) => beep(f, 0.5, 'triangle', 0.18, i * 0.09)); },
+    crash() {
+      if (!ready) return;
+      beep(80, 0.4, 'sine', 0.45);
+      const s = ctx.createBufferSource(); s.buffer = noiseBuf || null;
+      if (!s.buffer) return;
+      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 800;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.3, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      s.connect(f); f.connect(g); g.connect(master); s.start(); s.stop(ctx.currentTime + 0.4);
+    },
+    nitro() {
+      if (!ready) return;
+      const t = ctx.currentTime;
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sawtooth'; o.frequency.setValueAtTime(180, t);
+      o.frequency.exponentialRampToValueAtTime(1400, t + 0.55);
+      g.gain.setValueAtTime(0.16, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+      const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 400;
+      o.connect(f); f.connect(g); g.connect(master); o.start(t); o.stop(t + 0.62);
+      const s = ctx.createBufferSource(); if (noiseBuf) { s.buffer = noiseBuf; s.loop = true; }
+      const ng = ctx.createGain(); ng.gain.setValueAtTime(0.12, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+      s.connect(ng); ng.connect(master); s.start(t); s.stop(t + 0.55);
+    },
+    finish() { [523, 659, 784, 1046, 1318].forEach((f, i) => beep(f, 0.9, 'triangle', 0.17, i * 0.12)); }
+  };
+})();
+
+/* =====================================================================
+   7. ВВОД
+   ===================================================================== */
+const input = { throttle: 0, steer: 0, handbrake: 0, nitro: false };
+const keys = {};
+const touchInput = { x: 0, y: 0, hb: false, nitro: false };
+let gamepadActive = false;
+
+addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
+  keys[k] = true;
+  if (k === 'escape') togglePause();
+  if (k === 'r' && state === 'race') respawn();
+  if (k === 'm') toggleMute();
+  if (k === 'enter' && state === 'menu') startRace();
+});
+addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+function readGamepad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const gp = pads && pads[0];
+  gamepadActive = !!(gp && gp.connected);
+  if (!gamepadActive) return;
+  const ax = gp.axes[0] || 0;
+  const rt = gp.buttons[7] ? gp.buttons[7].value : 0;
+  const lt = gp.buttons[6] ? gp.buttons[6].value : 0;
+  const a = gp.buttons[0] && gp.buttons[0].pressed;
+  touchInput.x = Math.abs(ax) > 0.08 ? ax : 0;
+  touchInput.y = Math.abs(rt - lt) > 0.05 ? rt - lt : 0;
+  touchInput.hb = !!a;
+  touchInput.gp = true;
+}
+function updateInput() {
+  readGamepad();
+  let thr = 0, steer = 0, hb = 0, nitro = false;
+  if (keys['w'] || keys['arrowup']) thr += 1;
+  if (keys['s'] || keys['arrowdown']) thr -= 1;
+  if (keys['a'] || keys['arrowleft']) steer -= 1;
+  if (keys['d'] || keys['arrowright']) steer += 1;
+  hb = keys[' '] ? 1 : 0;
+  nitro = !!keys['shift'];
+  if (touchInput.gp) {
+    thr = touchInput.y; steer = touchInput.x;
+    hb = Math.max(hb, touchInput.hb ? 1 : 0);
+    nitro = nitro || !!input.nitroBtn;
+  }
+  if (Math.abs(touchInput.x) > 0.01 || Math.abs(touchInput.y) > 0.01) {
+    thr = Math.abs(touchInput.y) > Math.abs(thr) ? touchInput.y : thr;
+    steer = Math.abs(touchInput.x) > Math.abs(steer) ? touchInput.x : steer;
+  }
+  if (touchInput.hb) hb = 1;
+  if (touchInput.nitro) nitro = true;
+  input.throttle = damp(input.throttle, thr, 14, 1 / 60);
+  input.steer = damp(input.steer, steer, 16, 1 / 60);
+  input.handbrake = damp(input.handbrake, hb, 18, 1 / 60);
+  input.nitro = nitro;
+}
+
+/* =====================================================================
+   8. ФИЗИКА
+   ===================================================================== */
+const car = {
+  pos: new THREE.Vector3(), vel: new THREE.Vector3(), heading: 0,
+  angular: 0, speed: 0, driftAngle: 0, driftTime: 0, active: false
+};
+let trackIdx = 0;
+
+function nearestOnTrack(px, pz, prevIdx) {
+  let best = prevIdx, bestD = Infinity;
+  const W = 90;
+  for (let i = -W; i <= W; i++) {
+    const k = (prevIdx + i + SAMPLES) % SAMPLES;
+    const p = samplePts[k];
+    const d = (p.x - px) * (p.x - px) + (p.z - pz) * (p.z - pz);
+    if (d < bestD) { bestD = d; best = k; }
+  }
+  if (Math.sqrt(bestD) > 26) {
+    for (let k = 0; k < SAMPLES; k++) {
+      const p = samplePts[k];
+      const d = (p.x - px) * (p.x - px) + (p.z - pz) * (p.z - pz);
+      if (d < bestD) { bestD = d; best = k; }
+    }
+  }
+  return { idx: best, dist: Math.sqrt(bestD) };
+}
+
+function placeCarAt(u) {
+  const p = curve.getPointAt(u), t = curve.getTangentAt(u);
+  car.pos.set(p.x, 0, p.z);
+  car.heading = Math.atan2(t.x, t.z);
+  car.vel.set(0, 0, 0);
+  car.angular = 0;
+  car.speed = 0;
+  car.driftTime = 0;
+  trackIdx = Math.floor(((u % 1) + 1) % 1 * SAMPLES);
+}
+
+function respawn() {
+  const u = lastCP >= 0 ? checkpointU[lastCP === 0 ? CFG.checkpoints - 1 : lastCP - 1] : 0;
+  placeCarAt(u);
+  comboReset();
+  showBadge('RESPAWN');
+  Audio5.crash();
+}
+
+function updatePhysics(dt) {
+  const c = car;
+  const fwd = new THREE.Vector3(Math.sin(c.heading), 0, Math.cos(c.heading));
+  const rightV = new THREE.Vector3(fwd.z, 0, -fwd.x);
+
+  let vF = c.vel.dot(fwd);
+  const vR = c.vel.dot(rightV);
+
+  const nitroOn = c.nitroActive && c.nitro > 1;
+  const maxS = nitroOn ? CFG.nitroSpeed : CFG.maxSpeed;
+  const grip = c.handbrake > 0.5 ? CFG.gripHand : CFG.grip;
+
+  if (input.throttle > 0) {
+    if (vF < 0) vF += CFG.brake * dt * input.throttle;
+    else vF += CFG.enginePower * dt * input.throttle * (nitroOn ? 1.75 : 1);
+  } else if (input.throttle < 0) {
+    if (vF > 0.5) vF -= CFG.brake * dt * -input.throttle;
+    else vF -= CFG.reversePower * dt * -input.throttle;
+  } else {
+    vF -= vF * 0.6 * dt;
+  }
+  vF -= vF * 0.35 * dt;
+  vF = clamp(vF, -18, maxS);
+
+  const speedFactor = clamp(Math.abs(vF) / CFG.maxSpeed, 0, 1.4);
+  const dir = vF >= 0 ? 1 : -1;
+  const turnRate = CFG.turnSpeed * (0.28 + 0.72 * Math.min(speedFactor, 1)) * grip;
+  const wanted = -input.steer * turnRate * dir;
+  c.angular = damp(c.angular, wanted, 5.5, dt);
+  c.heading += c.angular * dt;
+
+  /* боковой захват: при ручнике почти нет */
+  let newVR = vR * (c.handbrake > 0.5 ? Math.pow(0.55, dt * 12) : Math.pow(0.02, dt * 6));
+  const f2 = new THREE.Vector3(Math.sin(c.heading), 0, Math.cos(c.heading));
+  const r2 = new THREE.Vector3(f2.z, 0, -f2.x);
+  c.vel.set(f2.x * vF + r2.x * newVR, 0, f2.z * vF + r2.z * newVR);
+
+  c.pos.addScaledVector(c.vel, dt);
+
+  c.speed = c.vel.length();
+  const driftCos = c.speed > 2 ? clamp(c.vel.clone().normalize().dot(f2), -1, 1) : 1;
+  c.driftAngle = Math.acos(driftCos) * 180 / Math.PI;
+
+  /* границы: мягкий отскок — теряем 10–20% скорости, машину доворачивает от стены */
+  const near = nearestOnTrack(c.pos.x, c.pos.z, trackIdx);
+  trackIdx = near.idx;
+  const limit = CFG.halfWidth - 0.9;
+  if (near.dist > limit) {
+    const p = samplePts[near.idx], t = sampleTan[near.idx];
+    const r = new THREE.Vector3(t.z, 0, -t.x);
+    const sign = Math.sign((c.pos.x - p.x) * r.x + (c.pos.z - p.z) * r.z) || 1;
+    c.pos.x = p.x + r.x * sign * limit;
+    c.pos.z = p.z + r.z * sign * limit;
+
+    const normalVel = c.vel.dot(r) * sign;
+    /* скорость падает на 12–18% пропорционально силе удара во внешнюю стену */
+    const hitForce = clamp(Math.abs(normalVel) / 12, 0, 1);
+    const keep = 1 - (0.18 - 0.06 * (1 - hitForce));
+    c.vel.multiplyScalar(keep);
+    /* гасим нормальную составляющую и подталкиваем внутрь трассы */
+    const inward = c.vel.dot(r) * sign;
+    c.vel.addScaledVector(r, -sign * (inward + 1.2));
+    /* импульс разворачивает машину: доворот в сторону трассы + лёгкий снос */
+    const headingDir = Math.sign(c.vel.dot(t)) || 1;
+    const impact = clamp(Math.abs(normalVel) / 18, 0, 1);
+    const sideMatch = Math.sign((Math.sin(c.heading) * r.x + Math.cos(c.heading) * r.z) * sign) || 1;
+    c.angular += -sideMatch * sign * headingDir * (0.9 + impact * 2.2);
+    c.heading += c.angular * dt * 0.5;
+
+    if (!c.lastHit || performance.now() - c.lastHit > 260) {
+      c.lastHit = performance.now();
+      comboReset();
+      flash();
+      shake = 0.28;
+      Audio5.crash();
+    }
+  }
+
+  c.pos.x = clamp(c.pos.x, -900, 900);
+  c.pos.z = clamp(c.pos.z, -900, 900);
+}
+
+/* =====================================================================
+   9. ГЕЙМПЛЕЙ
+   ===================================================================== */
+const state = { v: 'load' };
+let state_ = 'load';
+let lastCP = -1;
+let lap = 1;
+let cpCount = 0;
+let raceTime = 0, lapTime = 0;
+let lapTimes = [], lapScores = [];
+let score = 0, driftScore = 0, comboMult = 1;
+let started = false, shake = 0;
+let bestLap = +(localStorage.getItem('neondrift.bestLap') || 0);
+let bestScore = +(localStorage.getItem('neondrift.bestScore') || 0);
+
+Object.defineProperty(window, 'state', { get: () => state.v, set: (v) => { state.v = v; } });
+
+function comboReset() {
+  // очки уже начислены; сбрасываем длительность
+  car.driftTime = 0;
+  comboMult = 1;
+  pendingDrift = 0;
+}
+let pendingDrift = 0;
+
+function showBadge(txt) {
+  const b = $('badge');
+  b.textContent = txt; b.classList.add('on');
+  clearTimeout(b._t); b._t = setTimeout(() => b.classList.remove('on'), 1100);
+}
+function flash() {
+  const f = $('flash');
+  f.style.opacity = '0.55';
+  setTimeout(() => f.style.opacity = '0', 180);
+}
+function toggleMute() {
+  const m = Audio5.toggleMute();
+  const btn = $('mute'); btn.textContent = m ? '🔇' : '🔊';
+}
+
+function setState(s) { state.v = s; }
+function showOnly(id) {
+  ['scrLoad', 'scrStart', 'scrPause', 'scrFinish'].forEach(k => $(k).classList.toggle('on', k === id));
+}
+
+function startRace() {
+  Audio5.init(); Audio5.resume();
+  lap = 1; cpCount = 0; lastCP = -1;
+  raceTime = 0; lapTime = 0; lapTimes = []; lapScores = [];
+  score = 0; driftScore = 0; comboMult = 1; pendingDrift = 0;
+  car.nitro = 100; car.nitroActive = false;
+  placeCarAt(0);
+  gateMeshes.forEach(g => g.passed = false);
+  startGhost = 0;
+  setState('race');
+  started = true;
+  showOnly(null);
+  $('hud').classList.add('on');
+  $('mute').classList.add('on');
+  showBadge('GO!');
+  Audio5.lap();
+  prevArc = 0;
+  updateHUD(true);
+}
+
+function backToMenu() {
+  setState('menu');
+  showOnly('scrStart');
+  $('hud').classList.remove('on');
+  updateBestLabel();
+  placeCarAt(0.42);
+  camera.position.set(car.pos.x + 8, 5, car.pos.z + 10);
+}
+
+function togglePause() {
+  if (state.v === 'race') { setState('pause'); showOnly('scrPause'); }
+  else if (state.v === 'pause') { setState('race'); showOnly(null); }
+}
+
+function finishRace() {
+  setState('finish');
+  $('hud').classList.remove('on');
+  showOnly('scrFinish');
+  Audio5.finish();
+  const total = raceTime;
+  const bl = Math.min(...lapTimes);
+  let rec = false;
+  if (!bestLap || bl < bestLap) { bestLap = bl; localStorage.setItem('neondrift.bestLap', String(bl)); rec = true; }
+  if (!bestScore || score > bestScore) { bestScore = score; localStorage.setItem('neondrift.bestScore', String(score)); rec = true; }
+  $('finTime').textContent = `${fmt(total)}  ·  ${score} ОЧКОВ`;
+  $('recLbl').style.display = rec ? 'block' : 'none';
+  const tb = $('lapsBody'); tb.innerHTML = '';
+  lapTimes.forEach((t, i) => {
+    const tr = document.createElement('tr');
+    if (t === bl) tr.className = 'best';
+    tr.innerHTML = `<td>Круг ${i + 1}</td><td>${fmt(t)}</td><td>${lapScores[i] || 0}</td>`;
+    tb.appendChild(tr);
+  });
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td><b>Итого</b></td><td><b>${fmt(total)}</b></td><td><b>${score}</b></td>`;
+  tb.appendChild(tr);
+}
+
+/* прогресс по кругу */
+let prevArc = 0;
+function trackProgress(dt) {
+  const p = curve.getPointAt(0);
+  const near = nearestOnTrack(car.pos.x, car.pos.z, trackIdx);
+  const u = near.idx / SAMPLES;
+  const arc = u * TRACK_LEN;
+  const prev = prevArc;
+  prevArc = arc;
+
+  /* чекпоинты по дуге */
+  for (let i = 0; i < CFG.checkpoints; i++) {
+    const cu = checkpointU[i];
+    const g = gateMeshes[i];
+    const cuArc = cu * TRACK_LEN;
+    const pP = samplePts[Math.floor(cu * SAMPLES) % SAMPLES];
+    /* попадание через ворота: близко к плоскости по дуге и по ширине */
+    const d = (samplePts[near.idx].x - pP.x) ** 2 + (samplePts[near.idx].z - pP.z) ** 2;
+    if (d < 36 && car.speed > 4) {
+      const expected = (lastCP + 1) % CFG.checkpoints;
+      if (i === expected) {
+        lastCP = i;
+        cpCount++;
+        addScore(CFG.scoreCP);
+        burstAt(g.group);
+        Audio5.checkpoint();
+        showBadge(i === CFG.checkpoints - 1 ? 'ФИНИШ КРУГА' : `CHECKPOINT ${cpCount % CFG.checkpoints || CFG.checkpoints}/${CFG.checkpoints}`);
+        if (i === CFG.checkpoints - 1) {
+          completeLap();
+        }
+      }
+    }
+  }
+}
+
+function completeLap() {
+  lapTimes.push(lapTime);
+  lapScores.push(Math.round(score - (lapScores.reduce((a, b) => a + b, 0))));
+  addScore(CFG.scoreLap);
+  if (lap >= CFG.laps) { finishRace(); return; }
+  lap++;
+  lapTime = 0;
+  showBadge(`КРУГ ${lap} / ${CFG.laps}`);
+  Audio5.lap();
+  lastCP = -1;
+}
+
+function addScore(v) { score += v; }
+
+function burstAt(group) {
+  burst.position.copy(group.mesh.getWorldPosition(new THREE.Vector3()));
+  burst.rotation.set(-Math.PI / 2, 0, 0);
+  burst.material.color.set(group.mat.emissive);
+  burst.scale.setScalar(0.3);
+  burst.material.opacity = 0.9;
+  burstT = 1;
+}
+
+/* =====================================================================
+   10. КАМЕРА
+   ===================================================================== */
+const camPos = new THREE.Vector3();
+const camLook = new THREE.Vector3();
+let camMouseYaw = 0;
+addEventListener('mousemove', (e) => {
+  if (isTouch) return;
+  camMouseYaw = lerp(camMouseYaw, ((e.clientX / innerWidth) - 0.5) * 0.35, 0.08);
+});
+
+function updateCamera(dt) {
+  const c = car;
+  const drifting = c.driftAngle > CFG.driftThresh && c.speed > 6;
+  const dist = 8 + (drifting ? 2 : 0);
+  const height = isTouch ? 5 : 4;
+  const back = new THREE.Vector3(Math.sin(c.heading), 0, Math.cos(c.heading)).multiplyScalar(-dist);
+  const side = new THREE.Vector3(Math.cos(c.heading), 0, -Math.sin(c.heading)).multiplyScalar(drifting ? (c.angular > 0 ? -1.6 : 1.6) : 0);
+  const target = c.pos.clone().add(back).add(side);
+  target.y = height;
+
+  const rotY = c.heading + camMouseYaw;
+  const behind = new THREE.Vector3(Math.sin(rotY), 0, Math.cos(rotY)).multiplyScalar(-dist);
+  const desired = c.pos.clone().add(behind); desired.y = height;
+
+  camPos.lerp(desired, 1 - Math.exp(-6 * dt));
+  const lookAt = c.pos.clone().add(new THREE.Vector3(Math.sin(c.heading), 0, Math.cos(c.heading)).multiplyScalar(5));
+  lookAt.y = 1.1;
+  camLook.lerp(lookAt, 1 - Math.exp(-8 * dt));
+
+  camera.position.copy(camPos);
+  if (shake > 0) {
+    camera.position.x += (Math.random() - 0.5) * shake * 1.4;
+    camera.position.y += (Math.random() - 0.5) * shake * 1.0;
+    shake = Math.max(0, shake - dt * 1.6);
+  }
+  camera.lookAt(camLook);
+
+  const wantFov = c.nitroActive ? CFG.nitroFov : CFG.baseFov + Math.min(c.speed / CFG.maxSpeed, 1) * 4;
+  camera.fov = damp(camera.fov, wantFov, 4, dt);
+  camera.updateProjectionMatrix();
+}
+
+/* =====================================================================
+   11. HUD
+   ===================================================================== */
+let hudT = 0;
+function updateHUD(force) {
+  $('ttime').textContent = fmt(raceTime);
+  $('ltime').textContent = fmt(lapTime);
+  $('lapTxt').textContent = `${Math.min(lap, CFG.laps)} / ${CFG.laps}`;
+  $('cpTxt').textContent = `Чекпоинт ${Math.max(0, lastCP + 1)} / ${CFG.checkpoints}`;
+  $('score').textContent = score;
+  const cb = $('combo');
+  cb.textContent = 'x' + comboMult;
+  cb.classList.toggle('on', comboMult > 1);
+  $('nitroFill').style.width = Math.max(0, Math.min(100, car.nitro)) + '%';
+  $('nitroBar').classList.toggle('low', car.nitro < 25);
+  const kmh = Math.round(car.speed * CFG.speedKmh);
+  $('spd').textContent = kmh;
+  const frac = clamp(car.speed / CFG.nitroSpeed, 0, 1);
+  $('archFill').setAttribute('stroke-dasharray', `${frac * 358} 478`);
+  const dw = $('driftWrap');
+  dw.classList.toggle('on', car.driftAngle > CFG.driftThresh && car.speed > 6);
+  const dm = clamp(car.driftAngle / 60, 0, 1);
+  $('driftFill').style.width = (dm * 100) + '%';
+  $('driftTxt').textContent = `DRIFT ${Math.round(car.driftAngle)}° · +${pendingDrift}`;
+}
+
+/* =====================================================================
+   12. МОБИЛЬНЫЙ ВВОД
+   ===================================================================== */
+if (isTouch) {
+  $('touch').classList.add('on');
+  const base = $('stickBase'), knob = $('stickKnob');
+  let stickId = null, cx = 0, cy = 0;
+  const R = 52;
+  const move = (t) => {
+    let dx = t.clientX - cx, dy = t.clientY - cy;
+    const d = Math.hypot(dx, dy);
+    if (d > R) { dx *= R / d; dy *= R / d; }
+    knob.style.transform = `translate(${dx}px,${dy}px)`;
+    touchInput.x = dx / R;
+    touchInput.y = -dy / R;
+  };
+  base.addEventListener('pointerdown', (e) => {
+    stickId = e.pointerId; base.setPointerCapture(e.pointerId);
+    const r = base.getBoundingClientRect(); cx = r.left + r.width / 2; cy = r.top + r.height / 2;
+    move(e); e.preventDefault();
+  });
+  base.addEventListener('pointermove', (e) => { if (e.pointerId === stickId) move(e); });
+  const end = (e) => {
+    if (e.pointerId !== stickId) return;
+    stickId = null; knob.style.transform = 'translate(0,0)';
+    touchInput.x = 0; touchInput.y = 0;
+  };
+  base.addEventListener('pointerup', end);
+  base.addEventListener('pointercancel', end);
+
+  const bindHold = (el, on, off) => {
+    el.addEventListener('pointerdown', (e) => { el.classList.add('act'); on(); e.preventDefault(); });
+    el.addEventListener('pointerup', (e) => { el.classList.remove('act'); off(); });
+    el.addEventListener('pointercancel', () => { el.classList.remove('act'); off(); });
+    el.addEventListener('pointerleave', () => { el.classList.remove('act'); off(); });
+  };
+  bindHold($('hbBtn'), () => touchInput.hb = true, () => touchInput.hb = false);
+  bindHold($('nBtn'), () => touchInput.nitro = true, () => touchInput.nitro = false);
+}
+
+/* =====================================================================
+   13. КНОПКИ UI
+   ===================================================================== */
+$('btnStart').onclick = () => startRace();
+$('btnResume').onclick = () => togglePause();
+$('btnRestartP').onclick = () => startRace();
+$('btnMenuP').onclick = () => backToMenu();
+$('btnAgain').onclick = () => startRace();
+$('btnMenuF').onclick = () => backToMenu();
+$('mute').onclick = () => toggleMute();
+const updateBestLabel = () => {
+  $('bestLbl').textContent = bestLap ? `ЛУЧШИЙ КРУГ: ${fmt(bestLap)}   ·   РЕКОРД: ${bestScore}` : 'БЕЗ РЕКОРДОВ — СТАНЬ ПЕРВЫМ';
+};
+updateBestLabel();
+
+/* =====================================================================
+   14. ЦИКЛ
+   ===================================================================== */
+let last = performance.now();
+let startGhost = 0;
+const clock = { t: 0 };
+
+function animate(now) {
+  requestAnimationFrame(animate);
+  const dt = Math.min((now - last) / 1000, 1 / 25);
+  last = now;
+  clock.t += dt;
+
+  /* декор всегда живой */
+  window.__stars.rotation.y += dt * 0.008;
+  palms.forEach((p, i) => { p.rotation.z = Math.sin(clock.t * 0.6 + p.userData.phase) * 0.025; });
+  gateMeshes.forEach(g => {
+    g.mesh.rotation.z = Math.sin(clock.t * 1.2 + g.u * 6) * 0.05;
+    g.mat.emissiveIntensity = 1.05 + Math.sin(clock.t * 2 + g.u * 9) * 0.18;
+  });
+  if (burstT > 0) {
+    burstT -= dt * 1.8;
+    burst.scale.setScalar(0.3 + (1 - burstT) * 5.5);
+    burst.material.opacity = Math.max(0, burstT * 0.9);
+  }
+
+  if (state.v === 'race') {
+    updateInput();
+    const steps = 2;
+    for (let s = 0; s < steps; s++) {
+      /* нитро */
+      const wantNitro = input.nitro && car.nitro > 1;
+      if (wantNitro && !car.nitroActive) Audio5.nitro();
+      car.nitroActive = wantNitro;
+      if (wantNitro) car.nitro = Math.max(0, car.nitro - CFG.nitroDrain * dt);
+      else car.nitro = Math.min(100, car.nitro + (car.driftAngle > CFG.driftThresh && car.speed > 8 ? CFG.nitroDriftRegen : CFG.nitroRegen) * dt);
+      updatePhysics(dt / steps);
+    }
+
+    raceTime += dt * 1000; lapTime += dt * 1000;
+
+    /* дрифт-очки */
+    if (car.driftAngle > CFG.driftThresh && car.speed > 6) {
+      car.driftTime += dt;
+      comboMult = car.driftTime < 2 ? 1 : car.driftTime < 5 ? 2 : car.driftTime < 10 ? 3 : 5;
+      const gain = car.driftAngle * car.speed * 0.1 * comboMult * dt * 2.4;
+      driftScore += gain;
+      pendingDrift = Math.round(driftScore);
+      score += gain;
+    } else if (car.driftAngle < 8 || car.speed < 4) {
+      if (car.driftTime > 0.35) { pendingDrift = Math.round(driftScore); driftScore = 0; }
+      car.driftTime = Math.max(0, car.driftTime - dt * 3);
+      if (car.driftTime < 0.1) { comboMult = 1; driftScore = 0; pendingDrift = 0; }
+    }
+    if (car.nitroActive) score += CFG.scoreNitro * dt;
+
+    trackProgress(dt);
+
+    /* звук */
+    Audio5.setEngine(car.speed / CFG.maxSpeed, input.throttle);
+    Audio5.setDrift(car.driftAngle > CFG.driftThresh ? (car.driftAngle / 45) * (car.speed / CFG.maxSpeed) : 0);
+
+    /* визуал машины */
+    carRoot.position.copy(car.pos);
+    carRoot.rotation.set(0, car.heading, 0);
+    const lean = clamp(-car.angular * Math.min(car.speed / 20, 1) * 0.22 + (car.driftAngle / 90) * Math.sign(-car.angular || 1) * 0.12, -0.28, 0.28);
+    carBody.rotation.z = damp(carBody.rotation.z, lean, 6, dt);
+    carBody.rotation.x = damp(carBody.rotation.x, clamp(-input.throttle * 0.035, -0.05, 0.05), 5, dt);
+    carBody.position.y = Math.sin(clock.t * 12) * 0.012 * Math.min(car.speed / 30, 1);
+
+    const spin = car.speed * dt / 0.42;
+    wheels.forEach(w => {
+      w.mesh.rotation.x -= spin;
+      if (w.front) w.pivot.rotation.y = damp(w.pivot.rotation.y, -input.steer * 0.5, 12, dt);
+    });
+    tailMat.emissiveIntensity = input.throttle < 0 || car.handbrake > 0.5 ? 2.4 : 1.2;
+    tailGlow.intensity = input.throttle < 0 ? 30 : 12;
+    underglow.color.set(0xff4fa8);
+    underglow.intensity = car.nitroActive ? 40 : 22;
+    underPlane.material.opacity = car.nitroActive ? 0.2 : 0.1;
+
+    /* дым и нитро-шлейф */
+    const exhaustWorld = [];
+    exhaustTips.forEach(e => exhaustWorld.push(e.getWorldPosition(new THREE.Vector3())));
+    if (car.handbrake > 0.5 && car.speed > 8 && Math.random() < 0.9) {
+      const wp = wheels.filter(w => !w.front).map(w => w.mesh.getWorldPosition(new THREE.Vector3()));
+      wp.forEach(p => emit(smoke, p.x, 0.15, p.z, 0, 0.6, 0, 0.7));
+    }
+    if (car.nitroActive) {
+      exhaustWorld.forEach(p => emit(nitroFx, p.x, p.y, p.z,
+        -Math.sin(car.heading) * 8, 0.4, -Math.cos(car.heading) * 8, 0.25));
+    } else if (input.throttle > 0.1 && Math.random() < 0.35) {
+      exhaustWorld.forEach(p => emit(nitroFx, p.x, p.y, p.z,
+        -Math.sin(car.heading) * 3, 0.3, -Math.cos(car.heading) * 3, 0.2));
+    }
+    updateParticles(smoke, dt);
+    updateParticles(nitroFx, dt);
+
+    updateCamera(dt);
+    hudT += dt;
+    if (hudT > 0.05) { hudT = 0; updateHUD(); }
+  } else {
+    /* меню: плавная орбита вокруг трассы */
+    if (state.v === 'menu' || state.v === 'load') {
+      const a = clock.t * 0.12;
+      const u = (0.06 + Math.sin(clock.t * 0.05) * 0.05) % 1;
+      const p = curve.getPointAt((clock.t * 0.01) % 1);
+      camera.position.set(p.x + Math.cos(a) * 22, 9 + Math.sin(clock.t * 0.3) * 1.5, p.z + Math.sin(a) * 22);
+      camera.lookAt(p.x, 1.2, p.z);
+      camera.fov = damp(camera.fov, 62, 2, dt); camera.updateProjectionMatrix();
+      carRoot.position.copy(p); carRoot.rotation.y = Math.atan2(curve.getTangentAt((clock.t * 0.01) % 1).x, curve.getTangentAt((clock.t * 0.01) % 1).z);
+      wheels.forEach(w => w.pivot.rotation.y = 0);
+      updateParticles(smoke, dt); updateParticles(nitroFx, dt);
+    }
+    if (state.v === 'pause' || state.v === 'finish') {
+      updateParticles(smoke, dt); updateParticles(nitroFx, dt);
+    }
+  }
+
+  /* свет идёт за машиной */
+  magentaLight.position.set(carRoot.position.x - 30, 12, carRoot.position.z - 10);
+  cyanLight.position.set(carRoot.position.x + 30, 12, carRoot.position.z + 10);
+  moonLight.position.set(carRoot.position.x - 60, 120, carRoot.position.z - 80);
+  moonLight.target.position.copy(carRoot.position);
+
+  composer.render();
+}
+
+/* =====================================================================
+   15. СТАРТ + RESIZE
+   ===================================================================== */
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+
+placeCarAt(0);
+camPos.copy(car.pos).add(new THREE.Vector3(0, 5, -10));
+requestAnimationFrame(animate);
+
+/* загрузка */
+let prog = 0;
+const loadInt = setInterval(() => {
+  prog = Math.min(100, prog + 14 + Math.random() * 12);
+  $('barFill').style.width = prog + '%';
+  if (prog >= 100) {
+    clearInterval(loadInt);
+    $('loadTxt').textContent = 'ГОТОВО';
+    setTimeout(() => {
+      state.v = 'menu';
+      showOnly('scrStart');
+      updateBestLabel();
+    }, 420);
+  }
+}, 90);
+
+/* первое касание раскрывает звук */
+addEventListener('pointerdown', () => { Audio5.init(); Audio5.resume(); }, { once: true });
+
+window.__neon = { car, curve, TRACK_LEN, get state() { return state.v; } };
+</script>
+</body>
+</html>
