@@ -429,7 +429,7 @@ trackGroup.add(dashes);
 /* чекпоинты-ворота */
 const checkpointU = [];
 const gateRingGeo = new THREE.TorusGeometry(CFG.halfWidth, 0.22, 8, 40);
-for (let i = 0; i < CFG.checkpoints; i++) checkpointU.push((i + 1) / CFG.checkpoints % 1);
+for (let i = 0; i < CFG.checkpoints; i++) checkpointU.push(i / CFG.checkpoints);
 const gateMeshes = [];
 for (const u of checkpointU) {
   const p = curve.getPointAt(u), t = curve.getTangentAt(u);
@@ -660,6 +660,58 @@ burst.rotation.x = -Math.PI / 2;
 scene.add(burst);
 let burstT = 0;
 
+/* следы от шин (skid marks) */
+const SKID_MAX = 900;
+const skid = (() => {
+  const geo = new THREE.PlaneGeometry(1, 1);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x0c0812, transparent: true, opacity: 0.5, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2
+  });
+  const mesh = new THREE.InstancedMesh(geo, mat, SKID_MAX);
+  mesh.frustumCulled = false;
+  mesh.count = SKID_MAX;
+  const m4 = new THREE.Matrix4();
+  m4.makeScale(0, 0, 0);
+  for (let i = 0; i < SKID_MAX; i++) mesh.setMatrixAt(i, m4);
+  scene.add(mesh);
+  return { mesh, m4, cursor: 0, lastL: new THREE.Vector3(), lastR: new THREE.Vector3(), m: new THREE.Matrix4() };
+})();
+
+function addSkidStrip(a, b, width) {
+  const dx = b.x - a.x, dz = b.z - a.z;
+  const len = Math.hypot(dx, dz);
+  if (len < 0.12 || len > 12) return;
+  skid.m.makeRotationY(Math.atan2(dx, dz));
+  skid.m.scale(new THREE.Vector3(width, 1, len));
+  skid.m.setPosition((a.x + b.x) / 2, 0.035, (a.z + b.z) / 2);
+  skid.mesh.setMatrixAt(skid.cursor, skid.m);
+  skid.cursor = (skid.cursor + 1) % SKID_MAX;
+  skid.mesh.instanceMatrix.needsUpdate = true;
+}
+
+function clearSkids() {
+  const z = new THREE.Matrix4().makeScale(0, 0, 0);
+  for (let i = 0; i < SKID_MAX; i++) skid.mesh.setMatrixAt(i, z);
+  skid.mesh.instanceMatrix.needsUpdate = true;
+  skid.cursor = 0;
+}
+
+const _tmpL = new THREE.Vector3(), _tmpR = new THREE.Vector3();
+function updateSkidMarks(active, dt) {
+  if (!active) { skid.lastL.clear(); skid.lastR.clear(); return; }
+  const rear = wheels.filter(w => !w.front);
+  if (rear.length < 2) return;
+  rear[0].mesh.getWorldPosition(_tmpL);
+  rear[1].mesh.getWorldPosition(_tmpR);
+  if (skid.lastL.lengthSq() > 0) {
+    addSkidStrip(skid.lastL, _tmpL, 0.3);
+    addSkidStrip(skid.lastR, _tmpR, 0.3);
+  }
+  skid.lastL.copy(_tmpL);
+  skid.lastR.copy(_tmpR);
+}
+
 /* =====================================================================
    6. ЗВУК
    ===================================================================== */
@@ -842,12 +894,17 @@ function placeCarAt(u) {
   car.angular = 0;
   car.speed = 0;
   car.driftTime = 0;
+  car.slipAngle = 0;
+  car.rearSlip = 0;
   trackIdx = Math.floor(((u % 1) + 1) % 1 * SAMPLES);
+  prevArc = (u % 1) * TRACK_LEN;
+  skid.lastL.clear(); skid.lastR.clear();
 }
 
 function respawn() {
-  const u = lastCP >= 0 ? checkpointU[lastCP === 0 ? CFG.checkpoints - 1 : lastCP - 1] : 0;
-  placeCarAt(u);
+  const u = lastCP >= 0 ? checkpointU[lastCP] : 0;
+  placeCarAt((u - 0.004 + 1) % 1);
+  prevArc = (u % 1) * TRACK_LEN;
   comboReset();
   showBadge('RESPAWN');
   Audio5.crash();
@@ -879,13 +936,31 @@ function updatePhysics(dt) {
 
   const speedFactor = clamp(Math.abs(vF) / CFG.maxSpeed, 0, 1.4);
   const dir = vF >= 0 ? 1 : -1;
-  const turnRate = CFG.turnSpeed * (0.28 + 0.72 * Math.min(speedFactor, 1)) * grip;
-  const wanted = -input.steer * turnRate * dir;
-  c.angular = damp(c.angular, wanted, 5.5, dt);
+
+  /* задний привод: поворот начинается за счёт заноса задней оси.
+     Залог идеального дрифта — сначала чуть сорвать корму, затем удерживать угол рулём. */
+  const slipTarget = -input.steer * dir;                 // куда «уходит» корма
+  const slipGain = c.handbrake > 0.5 ? 3.4 : 2.3;        // ручник срывает быстрее
+  c.rearSlip = damp(c.rearSlip || 0, slipTarget, slipGain, dt);
+
+  /* руль: поворачивает корпус, но эффективность падает с заносом —
+     при большом угле машина уже не рулится колёсами, её держит тяга */
+  const slip = clamp(Math.abs(c.slipAngle || 0) / 35, 0, 1);
+  const turnRate = CFG.turnSpeed * (0.28 + 0.72 * Math.min(speedFactor, 1)) * grip * (1 - slip * 0.45);
+  const steerTilt = -input.steer * turnRate * dir;
+  /* занос добавляет собственное вращение корпуса вокруг точки контакта */
+  const driftYaw = c.rearSlip * turnRate * (c.handbrake > 0.5 ? 0.9 : 0.55);
+  const wanted = steerTilt + driftYaw;
+  const responsiveness = c.handbrake > 0.5 ? 4.2 : 5.5;
+  c.angular = damp(c.angular, wanted, responsiveness, dt);
   c.heading += c.angular * dt;
 
-  /* боковой захват: при ручнике почти нет */
-  let newVR = vR * (c.handbrake > 0.5 ? Math.pow(0.55, dt * 12) : Math.pow(0.02, dt * 6));
+  /* сцепление задней оси: ручник — почти полное скольжение, газ в повороте — частичное */
+  let rearGrip;
+  if (c.handbrake > 0.5) rearGrip = 0.05;
+  else rearGrip = clamp(0.55 - Math.abs(c.angular) * 0.5 + Math.abs(input.throttle) * 0.12, 0.22, 0.55);
+  const newVR = vR * Math.pow(rearGrip, dt) ;
+
   const f2 = new THREE.Vector3(Math.sin(c.heading), 0, Math.cos(c.heading));
   const r2 = new THREE.Vector3(f2.z, 0, -f2.x);
   c.vel.set(f2.x * vF + r2.x * newVR, 0, f2.z * vF + r2.z * newVR);
@@ -895,6 +970,7 @@ function updatePhysics(dt) {
   c.speed = c.vel.length();
   const driftCos = c.speed > 2 ? clamp(c.vel.clone().normalize().dot(f2), -1, 1) : 1;
   c.driftAngle = Math.acos(driftCos) * 180 / Math.PI;
+  c.slipAngle = Math.atan2(vR, Math.abs(vF) + 0.001) * 180 / Math.PI;
 
   /* границы: мягкий отскок — теряем 10–20% скорости, машину доворачивает от стены */
   const near = nearestOnTrack(c.pos.x, c.pos.z, trackIdx);
@@ -1040,49 +1116,62 @@ function finishRace() {
 
 /* прогресс по кругу */
 let prevArc = 0;
+let lapStartScore = 0;
+
 function trackProgress(dt) {
-  const p = curve.getPointAt(0);
   const near = nearestOnTrack(car.pos.x, car.pos.z, trackIdx);
   const u = near.idx / SAMPLES;
   const arc = u * TRACK_LEN;
   const prev = prevArc;
   prevArc = arc;
 
-  /* чекпоинты по дуге */
+  /* переход через дугу 0 (линия старта/финиша) с учётом направления */
+  const crossed =
+    (prev > TRACK_LEN * 0.75 && arc < TRACK_LEN * 0.25) ? 1 :
+      (arc > TRACK_LEN * 0.75 && prev < TRACK_LEN * 0.25) ? -1 : 0;
+
+  /* чекпоинты: [0,25%,50%,75%] по дуге */
   for (let i = 0; i < CFG.checkpoints; i++) {
-    const cu = checkpointU[i];
     const g = gateMeshes[i];
-    const cuArc = cu * TRACK_LEN;
-    const pP = samplePts[Math.floor(cu * SAMPLES) % SAMPLES];
-    /* попадание через ворота: близко к плоскости по дуге и по ширине */
-    const d = (samplePts[near.idx].x - pP.x) ** 2 + (samplePts[near.idx].z - pP.z) ** 2;
-    if (d < 36 && car.speed > 4) {
+    const cpArc = i === 0 ? 0 : i / CFG.checkpoints * TRACK_LEN;
+    const passedForward =
+      crossed === 1 && i === 0 ? true :
+        (prev < cpArc && arc >= cpArc && Math.abs(arc - prev) < TRACK_LEN * 0.25);
+    const passed = passedForward && car.speed > 3;
+
+    if (passed && cpDetect[i] !== lap) {
       const expected = (lastCP + 1) % CFG.checkpoints;
-      if (i === expected) {
-        lastCP = i;
-        cpCount++;
-        addScore(CFG.scoreCP);
-        burstAt(g.group);
-        Audio5.checkpoint();
-        showBadge(i === CFG.checkpoints - 1 ? 'ФИНИШ КРУГА' : `CHECKPOINT ${cpCount % CFG.checkpoints || CFG.checkpoints}/${CFG.checkpoints}`);
-        if (i === CFG.checkpoints - 1) {
-          completeLap();
-        }
+      if (i !== expected && !(i === 0 && lastCP === CFG.checkpoints - 1)) continue;
+      cpDetect[i] = lap;
+      lastCP = i;
+      if (i > 0) cpCount = Math.max(cpCount, i);
+      addScore(CFG.scoreCP);
+      burstAt(g.group);
+      Audio5.checkpoint();
+      if (i === 0) {
+        completeLap();
+      } else {
+        showBadge(`CHECKPOINT ${i}/${CFG.checkpoints}`);
       }
     }
   }
 }
+const cpDetect = new Array(CFG.checkpoints).fill(0);
 
 function completeLap() {
+  if (lastCP !== CFG.checkpoints - 1) return;
   lapTimes.push(lapTime);
-  lapScores.push(Math.round(score - (lapScores.reduce((a, b) => a + b, 0))));
+  lapScores.push(Math.round(score - lapStartScore));
+  lapStartScore = Math.round(score);
   addScore(CFG.scoreLap);
+  lastCP = -1;
+  cpCount = 0;
+  cpDetect.fill(0);
   if (lap >= CFG.laps) { finishRace(); return; }
   lap++;
   lapTime = 0;
   showBadge(`КРУГ ${lap} / ${CFG.laps}`);
   Audio5.lap();
-  lastCP = -1;
 }
 
 function addScore(v) { score += v; }
@@ -1301,13 +1390,16 @@ function animate(now) {
     underglow.intensity = car.nitroActive ? 40 : 22;
     underPlane.material.opacity = car.nitroActive ? 0.2 : 0.1;
 
-    /* дым и нитро-шлейф */
+    /* дым, следы и нитро-шлейф */
     const exhaustWorld = [];
     exhaustTips.forEach(e => exhaustWorld.push(e.getWorldPosition(new THREE.Vector3())));
-    if (car.handbrake > 0.5 && car.speed > 8 && Math.random() < 0.9) {
+    const skidding = car.handbrake > 0.5 && car.speed > 8;
+    const drifting = car.driftAngle > CFG.driftThresh && car.speed > 10;
+    if ((skidding || drifting) && Math.random() < 0.9) {
       const wp = wheels.filter(w => !w.front).map(w => w.mesh.getWorldPosition(new THREE.Vector3()));
       wp.forEach(p => emit(smoke, p.x, 0.15, p.z, 0, 0.6, 0, 0.7));
     }
+    updateSkidMarks(skidding || (car.handbrake > 0.3 && car.speed > 6), dt);
     if (car.nitroActive) {
       exhaustWorld.forEach(p => emit(nitroFx, p.x, p.y, p.z,
         -Math.sin(car.heading) * 8, 0.4, -Math.cos(car.heading) * 8, 0.25));
