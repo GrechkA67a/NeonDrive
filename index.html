@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
@@ -214,7 +214,7 @@ const CFG = {
   enginePower: 35, drag: 0.995, brake: 26, reversePower: 16,
   maxSpeed: 50, nitroSpeed: 75,
   turnSpeed: 1.75, grip: 1.0, gripHand: 0.30, driftThresh: 15,
-  trackWidth: 18, halfWidth: 9, laps: 3, checkpoints: 4,
+  trackWidth: 18, halfWidth: 9, laps: 3, checkpoints: 4, lapThreshold: 1.0,
   fog: 0.008, baseFov: 70, nitroFov: 85,
   nitroDrain: 25, nitroDriftRegen: 5, nitroRegen: 2,
   scoreCP: 500, scoreLap: 2000, scoreNitro: 10,
@@ -429,9 +429,10 @@ trackGroup.add(dashes);
 /* чекпоинты-ворота */
 const checkpointU = [];
 const gateRingGeo = new THREE.TorusGeometry(CFG.halfWidth, 0.22, 8, 40);
-for (let i = 0; i < CFG.checkpoints; i++) checkpointU.push(i / CFG.checkpoints);
 const gateMeshes = [];
-for (const u of checkpointU) {
+for (let i = 0; i < CFG.checkpoints; i++) {
+  const u = i / CFG.checkpoints;
+  checkpointU.push(u);
   const p = curve.getPointAt(u), t = curve.getTangentAt(u);
   const g = new THREE.Group();
   const mate = gateMeshes.length % 2 ? 0x4fd8ff : 0xff5aa8;
@@ -660,58 +661,6 @@ burst.rotation.x = -Math.PI / 2;
 scene.add(burst);
 let burstT = 0;
 
-/* следы от шин (skid marks) */
-const SKID_MAX = 900;
-const skid = (() => {
-  const geo = new THREE.PlaneGeometry(1, 1);
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0x0c0812, transparent: true, opacity: 0.5, depthWrite: false,
-    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2
-  });
-  const mesh = new THREE.InstancedMesh(geo, mat, SKID_MAX);
-  mesh.frustumCulled = false;
-  mesh.count = SKID_MAX;
-  const m4 = new THREE.Matrix4();
-  m4.makeScale(0, 0, 0);
-  for (let i = 0; i < SKID_MAX; i++) mesh.setMatrixAt(i, m4);
-  scene.add(mesh);
-  return { mesh, m4, cursor: 0, lastL: new THREE.Vector3(), lastR: new THREE.Vector3(), m: new THREE.Matrix4() };
-})();
-
-function addSkidStrip(a, b, width) {
-  const dx = b.x - a.x, dz = b.z - a.z;
-  const len = Math.hypot(dx, dz);
-  if (len < 0.12 || len > 12) return;
-  skid.m.makeRotationY(Math.atan2(dx, dz));
-  skid.m.scale(new THREE.Vector3(width, 1, len));
-  skid.m.setPosition((a.x + b.x) / 2, 0.035, (a.z + b.z) / 2);
-  skid.mesh.setMatrixAt(skid.cursor, skid.m);
-  skid.cursor = (skid.cursor + 1) % SKID_MAX;
-  skid.mesh.instanceMatrix.needsUpdate = true;
-}
-
-function clearSkids() {
-  const z = new THREE.Matrix4().makeScale(0, 0, 0);
-  for (let i = 0; i < SKID_MAX; i++) skid.mesh.setMatrixAt(i, z);
-  skid.mesh.instanceMatrix.needsUpdate = true;
-  skid.cursor = 0;
-}
-
-const _tmpL = new THREE.Vector3(), _tmpR = new THREE.Vector3();
-function updateSkidMarks(active, dt) {
-  if (!active) { skid.lastL.clear(); skid.lastR.clear(); return; }
-  const rear = wheels.filter(w => !w.front);
-  if (rear.length < 2) return;
-  rear[0].mesh.getWorldPosition(_tmpL);
-  rear[1].mesh.getWorldPosition(_tmpR);
-  if (skid.lastL.lengthSq() > 0) {
-    addSkidStrip(skid.lastL, _tmpL, 0.3);
-    addSkidStrip(skid.lastR, _tmpR, 0.3);
-  }
-  skid.lastL.copy(_tmpL);
-  skid.lastR.copy(_tmpR);
-}
-
 /* =====================================================================
    6. ЗВУК
    ===================================================================== */
@@ -897,8 +846,7 @@ function placeCarAt(u) {
   car.slipAngle = 0;
   car.rearSlip = 0;
   trackIdx = Math.floor(((u % 1) + 1) % 1 * SAMPLES);
-  prevArc = (u % 1) * TRACK_LEN;
-  skid.lastL.clear(); skid.lastR.clear();
+  resetLapTracking(u);
 }
 
 function respawn() {
@@ -1072,7 +1020,7 @@ function startRace() {
   $('mute').classList.add('on');
   showBadge('GO!');
   Audio5.lap();
-  prevArc = 0;
+  resetLapTracking(0);
   updateHUD(true);
 }
 
@@ -1114,59 +1062,89 @@ function finishRace() {
   tb.appendChild(tr);
 }
 
-/* прогресс по кругу */
-let prevArc = 0;
+/* =====================================================================
+   ПОДСЧЁТ КРУГОВ — по пройденной доле обода от линии старта.
+   lapProgress накапливает только путь вперёд, поэтому проскок сэмплов
+   и кручение на месте круг не начисляют.
+   ===================================================================== */
+let prevArc = 0;            // дуга в прошлом кадре (0..TRACK_LEN)
+let lapProgress = 0;        // накопленный путь вперёд внутри текущего круга
 let lapStartScore = 0;
+let lapStartU = 0;          // доля трассы, с которой начался круг
+let lapCP = 0;              // сколько чекпоинтов круга уже взято
+const SECTOR = () => TRACK_LEN / CFG.checkpoints;
+
+function arcAt(i) { return i === 0 ? 0 : i * SECTOR(); }
+
+/* разность дуг с учётом петли: +вперёд, -назад */
+function arcDelta(prev, next) {
+  let d = next - prev;
+  const half = TRACK_LEN * 0.5;
+  if (d > half) d -= TRACK_LEN;
+  if (d < -half) d += TRACK_LEN;
+  return d;
+}
+
+function resetLapTracking(u) {
+  const startU = ((u % 1) + 1) % 1;
+  prevArc = startU * TRACK_LEN;
+  lapProgress = 0;
+  lapStartU = startU;
+  lapCP = 0;
+}
 
 function trackProgress(dt) {
   const near = nearestOnTrack(car.pos.x, car.pos.z, trackIdx);
-  const u = near.idx / SAMPLES;
-  const arc = u * TRACK_LEN;
-  const prev = prevArc;
+  trackIdx = near.idx;
+
+  /* если машина ушла с полотна, сэмплы не считаем —
+     иначе пробеги по обочине рвут дугу и ломают круг */
+  if (near.dist > CFG.halfWidth + 6) return;
+
+  const arc = (trackIdx / SAMPLES) * TRACK_LEN;
+  const delta = arcDelta(prevArc, arc);
   prevArc = arc;
 
-  /* переход через дугу 0 (линия старта/финиша) с учётом направления */
-  const crossed =
-    (prev > TRACK_LEN * 0.75 && arc < TRACK_LEN * 0.25) ? 1 :
-      (arc > TRACK_LEN * 0.75 && prev < TRACK_LEN * 0.25) ? -1 : 0;
+  if (Math.abs(delta) > 12) return;   // телепорт/респаун — не прогресс
 
-  /* чекпоинты: [0,25%,50%,75%] по дуге */
-  for (let i = 0; i < CFG.checkpoints; i++) {
-    const g = gateMeshes[i];
-    const cpArc = i === 0 ? 0 : i / CFG.checkpoints * TRACK_LEN;
-    const passedForward =
-      crossed === 1 && i === 0 ? true :
-        (prev < cpArc && arc >= cpArc && Math.abs(arc - prev) < TRACK_LEN * 0.25);
-    const passed = passedForward && car.speed > 3;
+  /* прогресс кольца для HUD идут только вперёд */
+  if (delta > 0) lapProgress += delta;
 
-    if (passed && cpDetect[i] !== lap) {
-      const expected = (lastCP + 1) % CFG.checkpoints;
-      if (i !== expected && !(i === 0 && lastCP === CFG.checkpoints - 1)) continue;
-      cpDetect[i] = lap;
+  /* чекпоинт i пройден, когда машина физически прошла его ворота */
+  for (let i = 1; i < CFG.checkpoints; i++) {
+    if (i <= lastCP) continue;
+    const passed = Math.floor((((arc - gateUArc(i)) + TRACK_LEN) % TRACK_LEN) / SECTOR());
+    if (passed >= 1) {
       lastCP = i;
-      if (i > 0) cpCount = Math.max(cpCount, i);
+      cpCount = i;
+      if (i > lapCP) lapCP = i;
       addScore(CFG.scoreCP);
-      burstAt(g.group);
+      burstAt(gateMeshes[i].group);
       Audio5.checkpoint();
-      if (i === 0) {
-        completeLap();
-      } else {
-        showBadge(`CHECKPOINT ${i}/${CFG.checkpoints}`);
-      }
+      showBadge(`CHECKPOINT ${i} / ${CFG.checkpoints - 1}`);
     }
   }
-}
-const cpDetect = new Array(CFG.checkpoints).fill(0);
 
-function completeLap() {
-  if (lastCP !== CFG.checkpoints - 1) return;
+  /* финиш круга: последний чекпоинт взят и обод пройден полностью */
+  if (lapCP < CFG.checkpoints - 1) return;
+  if (lapProgress < TRACK_LEN * CFG.lapThreshold) return;
+
+  lapProgress -= TRACK_LEN;
+  lapCP = 0;
+  closeLap();
+}
+
+/* дуга ворот чекпоинта i */
+function gateUArc(i) { return ((i / CFG.checkpoints) % 1) * TRACK_LEN; }
+
+function closeLap() {
   lapTimes.push(lapTime);
   lapScores.push(Math.round(score - lapStartScore));
   lapStartScore = Math.round(score);
   addScore(CFG.scoreLap);
-  lastCP = -1;
-  cpCount = 0;
-  cpDetect.fill(0);
+  lastCP = 0;
+  cpCount = CFG.checkpoints;
+  burstAt(gateMeshes[0].group);
   if (lap >= CFG.laps) { finishRace(); return; }
   lap++;
   lapTime = 0;
@@ -1390,7 +1368,7 @@ function animate(now) {
     underglow.intensity = car.nitroActive ? 40 : 22;
     underPlane.material.opacity = car.nitroActive ? 0.2 : 0.1;
 
-    /* дым, следы и нитро-шлейф */
+    /* дым и нитро-шлейф */
     const exhaustWorld = [];
     exhaustTips.forEach(e => exhaustWorld.push(e.getWorldPosition(new THREE.Vector3())));
     const skidding = car.handbrake > 0.5 && car.speed > 8;
@@ -1399,7 +1377,6 @@ function animate(now) {
       const wp = wheels.filter(w => !w.front).map(w => w.mesh.getWorldPosition(new THREE.Vector3()));
       wp.forEach(p => emit(smoke, p.x, 0.15, p.z, 0, 0.6, 0, 0.7));
     }
-    updateSkidMarks(skidding || (car.handbrake > 0.3 && car.speed > 6), dt);
     if (car.nitroActive) {
       exhaustWorld.forEach(p => emit(nitroFx, p.x, p.y, p.z,
         -Math.sin(car.heading) * 8, 0.4, -Math.cos(car.heading) * 8, 0.25));
@@ -1437,11 +1414,76 @@ function animate(now) {
   moonLight.position.set(carRoot.position.x - 60, 120, carRoot.position.z - 80);
   moonLight.target.position.copy(carRoot.position);
 
+  updateRain(dt);
   composer.render();
 }
 
 /* =====================================================================
-   15. СТАРТ + RESIZE
+   14.5 ЛЕГКИЙ ДОЖДЬ
+   ===================================================================== */
+const RAIN_COUNT = 1400;
+const RAIN_AREA = 90;           // половина стороны квадрата вокруг камеры
+const RAIN_TOP = 55;
+const RAIN_FALL = 42;
+const RAIN_TILT = new THREE.Vector3(0.16, -1, 0.09).normalize();
+const RAIN_STREAK = 1.1;
+
+const rainGeo = new THREE.BufferGeometry();
+const rainPos = new Float32Array(RAIN_COUNT * 6);
+const rainSeed = new Float32Array(RAIN_COUNT * 4);   // x0, y0, z0, скорость
+for (let i = 0; i < RAIN_COUNT; i++) {
+  const k = i * 4;
+  rainSeed[k] = (Math.random() * 2 - 1) * RAIN_AREA;
+  rainSeed[k + 1] = Math.random() * RAIN_TOP;
+  rainSeed[k + 2] = (Math.random() * 2 - 1) * RAIN_AREA;
+  rainSeed[k + 3] = 0.75 + Math.random() * 0.5;
+}
+rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+const rainMat = new THREE.LineBasicMaterial({
+  color: 0xa9c8ff, transparent: true, opacity: 0.28, depthWrite: false
+});
+const rainMesh = new THREE.LineSegments(rainGeo, rainMat);
+rainMesh.frustumCulled = false;
+scene.add(rainMesh);
+
+const _rainAnchor = new THREE.Vector3();
+const _rainDrop = new THREE.Vector3();
+
+function updateRain(dt) {
+  const ax = camera.position.x, az = camera.position.z;
+  for (let i = 0; i < RAIN_COUNT; i++) {
+    const k = i * 4, p = i * 6;
+    const speed = rainSeed[k + 3] * RAIN_FALL;
+    let x = rainSeed[k] + ax + RAIN_TILT.x * clock.t * speed * 0.35;
+    let z = rainSeed[k + 2] + az + RAIN_TILT.z * clock.t * speed * 0.35;
+    let y = rainSeed[k + 1] - (clock.t * speed) % RAIN_TOP;
+    if (y < 0) y += RAIN_TOP;
+    /* держим оси вокруг камеры */
+    x = ax + (((x - ax) % (RAIN_AREA * 2)) + RAIN_AREA * 3) % (RAIN_AREA * 2) - RAIN_AREA;
+    z = az + (((z - az) % (RAIN_AREA * 2)) + RAIN_AREA * 3) % (RAIN_AREA * 2) - RAIN_AREA;
+    _rainDrop.set(x, y, z);
+    rainPos[p] = x;
+    rainPos[p + 1] = y;
+    rainPos[p + 2] = z;
+    rainPos[p + 3] = x - RAIN_TILT.x * RAIN_STREAK;
+    rainPos[p + 4] = y + RAIN_STREAK;
+    rainPos[p + 5] = z - RAIN_TILT.z * RAIN_STREAK;
+  }
+  rainGeo.attributes.position.needsUpdate = true;
+}
+
+/* лёгкая мокрость полотна — только рассеяние бликов, без отражений */
+(() => {
+  scene.traverse(o => {
+    if (o.isMesh && o.material && o.material.emissive && o.material.metalness !== undefined
+        && o.material.color && o.material.color.getHex() === 0x12141c) {
+      o.material.roughness = Math.min(o.material.roughness, 0.55);
+      o.material.metalness = Math.max(o.material.metalness, 0.25);
+    }
+  });
+})();
+
+/* =====================================================================
    ===================================================================== */
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
